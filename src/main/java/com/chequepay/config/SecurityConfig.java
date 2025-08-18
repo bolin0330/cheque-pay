@@ -24,6 +24,7 @@ public class SecurityConfig {
         http.csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/register", "/auth/login").permitAll()
+                        .requestMatchers("/cheques/**").authenticated()
                         .anyRequest().authenticated()
                 )
                 .userDetailsService(userDetailsService)

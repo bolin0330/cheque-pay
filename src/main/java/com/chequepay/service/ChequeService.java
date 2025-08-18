@@ -5,10 +5,16 @@ import com.chequepay.dto.ChequeResponse;
 import com.chequepay.dto.ChequeSplitRequest;
 import com.chequepay.entity.Cheque;
 import com.chequepay.repository.ChequeRepository;
+import com.chequepay.util.AESUtil;
+import com.chequepay.util.NonceStore;
+import com.chequepay.util.RSAUtil;
+import com.chequepay.util.SignatureUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import javax.crypto.SecretKey;
 import java.math.BigDecimal;
+import java.security.KeyPair;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -18,20 +24,59 @@ public class ChequeService {
 
     private final ChequeRepository chequeRepository;
 
-    public ChequeResponse issueCheque(String payerUsername, ChequeRequest request) {
-        Cheque cheque = Cheque.builder()
-                .amount(request.getAmount())
-                .payerUsername(payerUsername)
-                .payeeUsername(request.getPayeeUsername())
-                .issueDate(LocalDateTime.now())
-                .expiryDate(request.getExpiryDate())
-                .status("ISSUED")
-                .signature("dummy-signature")
-                .encryptedData("dummy-encrypted")
-                .build();
+    private static final KeyPair rsaKeyPair;
+    private static final SecretKey aesKey;
 
-        chequeRepository.save(cheque);
-        return toResponse(cheque);
+    static {
+        try {
+            rsaKeyPair = RSAUtil.generateKeyPair(2048);
+            aesKey = AESUtil.generateAESKey();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to initialize keys", e);
+        }
+    }
+
+    public ChequeResponse issueCheque(String payerUsername, ChequeRequest request) {
+        try {
+            String nonce = NonceStore.generateNonce();
+            if (NonceStore.isReplay(nonce)) {
+                throw new RuntimeException("Replay attack detected: nonce already used");
+            }
+
+            String chequeData = String.format(
+                    "{ \"amount\": %s, \"payer\": \"%s\", \"payee\": \"%s\", \"expiry\": \"%s\", \"nonce\": \"%s\" }",
+                    request.getAmount(),
+                    payerUsername,
+                    request.getPayeeUsername(),
+                    request.getExpiryDate(),
+                    nonce
+            );
+
+            String encryptedData = AESUtil.encrypt(chequeData, aesKey);
+
+            String encryptedKey = RSAUtil.encrypt(AESUtil.toBase64(aesKey), rsaKeyPair.getPublic());
+
+            String signature = SignatureUtil.sign(chequeData, rsaKeyPair.getPrivate());
+
+            Cheque cheque = Cheque.builder()
+                    .amount(request.getAmount())
+                    .payerUsername(payerUsername)
+                    .payeeUsername(request.getPayeeUsername())
+                    .issueDate(LocalDateTime.now())
+                    .expiryDate(request.getExpiryDate())
+                    .status("ISSUED")
+                    .signature(signature)
+                    .encryptedData(encryptedData)
+                    .encryptedKey(encryptedKey)
+                    .nonce(nonce)
+                    .build();
+
+            chequeRepository.save(cheque);
+            return toResponse(cheque);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Error issuing cheque", e);
+        }
     }
 
     public Optional<ChequeResponse> getCheque(UUID chequeId) {
@@ -67,6 +112,7 @@ public class ChequeService {
         }
 
         List<ChequeResponse> result = new ArrayList<>();
+        String nonce = NonceStore.generateNonce();
         for (BigDecimal amt : request.getSplitAmounts()) {
             Cheque child = Cheque.builder()
                     .amount(amt)
@@ -78,6 +124,8 @@ public class ChequeService {
                     .parentChequeId(parent.getId())
                     .signature("dummy-signature")
                     .encryptedData("dummy-encrypted")
+                    .encryptedKey("dummy-key")
+                    .nonce(nonce)
                     .build();
             chequeRepository.save(child);
             result.add(toResponse(child));

@@ -43,5 +43,11 @@ public class Cheque {
     @Column(length = 5000)
     private String encryptedData;
 
+    @Column(length = 5000)
+    private String encryptedKey;
+
     private UUID parentChequeId;
+
+    @Column(unique = true, nullable = false)
+    private String nonce;
 }
