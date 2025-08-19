@@ -12,9 +12,7 @@ import com.chequepay.util.SignatureUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import javax.crypto.SecretKey;
 import java.math.BigDecimal;
-import java.security.KeyPair;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -23,25 +21,11 @@ import java.util.*;
 public class ChequeService {
 
     private final ChequeRepository chequeRepository;
-
-    private static final KeyPair rsaKeyPair;
-    private static final SecretKey aesKey;
-
-    static {
-        try {
-            rsaKeyPair = RSAUtil.generateKeyPair(2048);
-            aesKey = AESUtil.generateAESKey();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to initialize keys", e);
-        }
-    }
+    private final KeyManager keyManager;
 
     public ChequeResponse issueCheque(String payerUsername, ChequeRequest request) {
         try {
             String nonce = NonceStore.generateNonce();
-            if (NonceStore.isReplay(nonce)) {
-                throw new RuntimeException("Replay attack detected: nonce already used");
-            }
 
             String chequeData = String.format(
                     "{ \"amount\": %s, \"payer\": \"%s\", \"payee\": \"%s\", \"expiry\": \"%s\", \"nonce\": \"%s\" }",
@@ -52,11 +36,11 @@ public class ChequeService {
                     nonce
             );
 
-            String encryptedData = AESUtil.encrypt(chequeData, aesKey);
+            String encryptedData = AESUtil.encrypt(chequeData, keyManager.getAesKey());
 
-            String encryptedKey = RSAUtil.encrypt(AESUtil.toBase64(aesKey), rsaKeyPair.getPublic());
+            String encryptedKey = RSAUtil.encrypt(AESUtil.toBase64(keyManager.getAesKey()), keyManager.getRsaKeyPair().getPublic());
 
-            String signature = SignatureUtil.sign(chequeData, rsaKeyPair.getPrivate());
+            String signature = SignatureUtil.sign(chequeData, keyManager.getRsaKeyPair().getPrivate());
 
             Cheque cheque = Cheque.builder()
                     .amount(request.getAmount())

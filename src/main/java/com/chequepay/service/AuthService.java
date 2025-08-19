@@ -3,8 +3,10 @@ package com.chequepay.service;
 import com.chequepay.dto.AuthResponse;
 import com.chequepay.dto.LoginRequest;
 import com.chequepay.dto.RegisterRequest;
+import com.chequepay.entity.Account;
 import com.chequepay.entity.User;
 import com.chequepay.repository.UserRepository;
+import com.chequepay.repository.AccountRepository;
 import com.chequepay.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -12,11 +14,14 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+
 @Service
 @RequiredArgsConstructor
 public class AuthService {
 
     private final UserRepository userRepository;
+    private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final AuthenticationManager authenticationManager;
@@ -37,6 +42,14 @@ public class AuthService {
                 .build();
 
         userRepository.save(user);
+
+        Account account = Account.builder()
+                .username(user.getUsername())
+                .balance(BigDecimal.valueOf(5000))
+                .build();
+
+        accountRepository.save(account);
+
         return new AuthResponse(true, "User registered successfully", null);
     }
 
