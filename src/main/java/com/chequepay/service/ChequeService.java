@@ -78,47 +78,70 @@ public class ChequeService {
     }
 
     public List<ChequeResponse> splitCheque(UUID chequeId, ChequeSplitRequest request) {
-        Cheque parent = chequeRepository.findById(chequeId)
-                .orElseThrow(() -> new RuntimeException("Cheque not found"));
+        try {
+            Cheque parent = chequeRepository.findById(chequeId)
+                    .orElseThrow(() -> new RuntimeException("Cheque not found"));
 
-        if (parent.getParentChequeId() != null) {
-            throw new RuntimeException("Cannot split a child cheque");
+            if (parent.getParentChequeId() != null) {
+                throw new RuntimeException("Cannot split a child cheque");
+            }
+
+            if (!"ISSUED".equals(parent.getStatus())) {
+                throw new RuntimeException("Only ISSUED cheques can be split");
+            }
+
+            BigDecimal totalSplit = request.getSplitAmounts().stream()
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            if (totalSplit.compareTo(parent.getAmount()) != 0) {
+                throw new RuntimeException("Split amounts must add up to the parent cheque amount");
+            }
+
+            List<ChequeResponse> result = new ArrayList<>();
+            for (BigDecimal amt : request.getSplitAmounts()) {
+                String childNonce = NonceStore.generateNonce();
+
+                String chequeData = String.format(
+                        "{ \"amount\": %s, \"payer\": \"%s\", \"payee\": \"%s\", \"expiry\": \"%s\", \"nonce\": \"%s\" }",
+                        amt,
+                        parent.getPayerUsername(),
+                        parent.getPayeeUsername(),
+                        parent.getExpiryDate(),
+                        childNonce
+                );
+
+                String encryptedData = AESUtil.encrypt(chequeData, keyManager.getAesKey());
+                String encryptedKey = RSAUtil.encrypt(
+                        AESUtil.toBase64(keyManager.getAesKey()),
+                        keyManager.getRsaKeyPair().getPublic()
+                );
+                String signature = SignatureUtil.sign(chequeData, keyManager.getRsaKeyPair().getPrivate());
+
+                Cheque child = Cheque.builder()
+                        .amount(amt)
+                        .payerUsername(parent.getPayerUsername())
+                        .payeeUsername(parent.getPayeeUsername())
+                        .issueDate(LocalDateTime.now())
+                        .expiryDate(parent.getExpiryDate())
+                        .status("ISSUED")
+                        .parentChequeId(parent.getId())
+                        .signature(signature)
+                        .encryptedData(encryptedData)
+                        .encryptedKey(encryptedKey)
+                        .nonce(childNonce)
+                        .build();
+
+                chequeRepository.save(child);
+                result.add(toResponse(child));
+            }
+
+            parent.setStatus("SPLIT");
+            chequeRepository.save(parent);
+
+            return result;
+
+        } catch (Exception e) {
+            throw new RuntimeException("Error splitting cheque", e);
         }
-
-        if (!"ISSUED".equals(parent.getStatus())) {
-            throw new RuntimeException("Only ISSUED cheques can be split");
-        }
-
-        BigDecimal totalSplit = request.getSplitAmounts().stream()
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        if (totalSplit.compareTo(parent.getAmount()) != 0) {
-            throw new RuntimeException("Split amounts must add up to the parent cheque amount");
-        }
-
-        List<ChequeResponse> result = new ArrayList<>();
-        String nonce = NonceStore.generateNonce();
-        for (BigDecimal amt : request.getSplitAmounts()) {
-            Cheque child = Cheque.builder()
-                    .amount(amt)
-                    .payerUsername(parent.getPayerUsername())
-                    .payeeUsername(parent.getPayeeUsername())
-                    .issueDate(LocalDateTime.now())
-                    .expiryDate(parent.getExpiryDate())
-                    .status("ISSUED")
-                    .parentChequeId(parent.getId())
-                    .signature("dummy-signature")
-                    .encryptedData("dummy-encrypted")
-                    .encryptedKey("dummy-key")
-                    .nonce(nonce)
-                    .build();
-            chequeRepository.save(child);
-            result.add(toResponse(child));
-        }
-
-        parent.setStatus("SPLIT");
-        chequeRepository.save(parent);
-
-        return result;
     }
 
     private ChequeResponse toResponse(Cheque cheque) {
