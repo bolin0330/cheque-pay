@@ -13,7 +13,9 @@ public class ChequeResponse {
     private UUID id;
     private BigDecimal amount;
     private String payerUsername;
+    private String payerRealname;
     private String payeeUsername;
+    private String payeeRealname;
     private LocalDateTime issueDate;
     private LocalDateTime expiryDate;
     private String status;

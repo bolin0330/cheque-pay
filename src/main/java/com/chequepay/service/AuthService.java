@@ -34,10 +34,20 @@ public class AuthService {
             return new AuthResponse(false, "Email already registered", null);
         }
 
+        if (!request.getRealname().matches("^[A-Za-z ]{1,25}$")) {
+            return new AuthResponse(false, "Real name must be English letters and spaces only (max 25)", null);
+        }
+
+        if (!request.getPhoneNumber().matches("^[0-9]{1,15}$")) {
+            return new AuthResponse(false, "Phone number must be digits only (max 15)", null);
+        }
+
         User user = User.builder()
                 .username(request.getUsername())
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
+                .realname(request.getRealname())
+                .phoneNumber(request.getPhoneNumber())
                 .role("USER")
                 .build();
 
@@ -45,6 +55,7 @@ public class AuthService {
 
         Account account = Account.builder()
                 .username(user.getUsername())
+                .realname(request.getRealname())
                 .balance(BigDecimal.valueOf(5000))
                 .build();
 
@@ -64,7 +75,5 @@ public class AuthService {
             return new AuthResponse(false, "Invalid username or password", null);
         }
     }
-
-
 
 }

@@ -28,4 +28,10 @@ public class User {
 
     @Column(nullable = false)
     private String role;
+
+    @Column(nullable = false, length = 25)
+    private String realname;
+
+    @Column(nullable = false, length = 15)
+    private String phoneNumber;
 }

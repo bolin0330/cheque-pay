@@ -1,6 +1,7 @@
 package com.chequepay.controller;
 
 import com.chequepay.dto.AuthResponse;
+import com.chequepay.dto.ProfileResponse;
 import com.chequepay.dto.LoginRequest;
 import com.chequepay.dto.RegisterRequest;
 import com.chequepay.entity.User;
@@ -12,6 +13,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Optional;
+
 
 @RestController
 @RequestMapping("/auth")
@@ -32,17 +34,22 @@ public class AuthController {
     }
 
     @GetMapping("/profile")
-    public AuthResponse profile() {
+    public ProfileResponse profile() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String username = authentication.getName();
 
         Optional<User> userOpt = userRepository.findByUsername(username);
         if (userOpt.isPresent()) {
             User user = userOpt.get();
-            String message = String.format("Profile: %s (%s)", user.getUsername(), user.getEmail());
-            return new AuthResponse(true, message, null);
+            return new ProfileResponse(
+                    user.getUsername(),
+                    user.getRealname(),
+                    user.getPhoneNumber(),
+                    user.getEmail(),
+                    user.getRole()
+            );
         } else {
-            return new AuthResponse(false, "User not found", null);
+            throw new RuntimeException("User not found");
         }
     }
 

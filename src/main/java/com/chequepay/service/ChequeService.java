@@ -4,7 +4,9 @@ import com.chequepay.dto.ChequeRequest;
 import com.chequepay.dto.ChequeResponse;
 import com.chequepay.dto.ChequeSplitRequest;
 import com.chequepay.entity.Cheque;
+import com.chequepay.entity.User;
 import com.chequepay.repository.ChequeRepository;
+import com.chequepay.repository.UserRepository;
 import com.chequepay.util.AESUtil;
 import com.chequepay.util.NonceStore;
 import com.chequepay.util.RSAUtil;
@@ -21,10 +23,20 @@ import java.util.*;
 public class ChequeService {
 
     private final ChequeRepository chequeRepository;
+    private final UserRepository userRepository;
     private final KeyManager keyManager;
 
     public ChequeResponse issueCheque(String payerUsername, ChequeRequest request) {
         try {
+            User payer = userRepository.findByUsername(payerUsername)
+                    .orElseThrow(() -> new RuntimeException("Payer not found"));
+            User payee = userRepository.findByUsername(request.getPayeeUsername())
+                    .orElseThrow(() -> new RuntimeException("Payee not found"));
+
+            if (!payee.getRealname().equals(request.getPayeeRealname())) {
+                throw new RuntimeException("Payee real name does not match the account");
+            }
+
             String nonce = NonceStore.generateNonce();
 
             String chequeData = String.format(
@@ -37,15 +49,15 @@ public class ChequeService {
             );
 
             String encryptedData = AESUtil.encrypt(chequeData, keyManager.getAesKey());
-
             String encryptedKey = RSAUtil.encrypt(AESUtil.toBase64(keyManager.getAesKey()), keyManager.getRsaKeyPair().getPublic());
-
             String signature = SignatureUtil.sign(chequeData, keyManager.getRsaKeyPair().getPrivate());
 
             Cheque cheque = Cheque.builder()
                     .amount(request.getAmount())
                     .payerUsername(payerUsername)
+                    .payerRealname(payer.getRealname())
                     .payeeUsername(request.getPayeeUsername())
+                    .payeeRealname(payee.getRealname())
                     .issueDate(LocalDateTime.now())
                     .expiryDate(request.getExpiryDate())
                     .status("ISSUED")
@@ -119,7 +131,9 @@ public class ChequeService {
                 Cheque child = Cheque.builder()
                         .amount(amt)
                         .payerUsername(parent.getPayerUsername())
+                        .payerRealname(parent.getPayerRealname())
                         .payeeUsername(parent.getPayeeUsername())
+                        .payeeRealname(parent.getPayeeRealname())
                         .issueDate(LocalDateTime.now())
                         .expiryDate(parent.getExpiryDate())
                         .status("ISSUED")
@@ -149,7 +163,9 @@ public class ChequeService {
                 cheque.getId(),
                 cheque.getAmount(),
                 cheque.getPayerUsername(),
+                cheque.getPayerRealname(),
                 cheque.getPayeeUsername(),
+                cheque.getPayeeRealname(),
                 cheque.getIssueDate(),
                 cheque.getExpiryDate(),
                 cheque.getStatus()

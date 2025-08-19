@@ -8,5 +8,6 @@ import java.time.LocalDateTime;
 public class ChequeRequest {
     private BigDecimal amount;
     private String payeeUsername;
+    private String payeeRealname;
     private LocalDateTime expiryDate;
 }

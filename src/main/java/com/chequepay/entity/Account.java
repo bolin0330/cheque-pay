@@ -23,4 +23,7 @@ public class Account {
 
     @Column(nullable = false)
     private BigDecimal balance;
+
+    @Column(nullable = false, length = 25)
+    private String realname;
 }

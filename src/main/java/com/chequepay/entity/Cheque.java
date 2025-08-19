@@ -28,6 +28,12 @@ public class Cheque {
     @Column(nullable = false)
     private String payeeUsername;
 
+    @Column(nullable = false, length = 25)
+    private String payerRealname;
+
+    @Column(nullable = false, length = 25)
+    private String payeeRealname;
+
     @Column(nullable = false)
     private LocalDateTime issueDate;
 
