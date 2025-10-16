@@ -21,14 +21,17 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http.csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/auth/register", "/auth/login").permitAll()
-                        .requestMatchers("/cheques/**").authenticated()
-                        .anyRequest().authenticated()
-                )
-                .userDetailsService(userDetailsService)
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        http
+            .cors(cors -> {})
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(auth -> auth
+                    .requestMatchers("/auth/register", "/auth/login").permitAll()
+                    .requestMatchers("/auth/profile").authenticated()
+                    .requestMatchers("/account/**", "/cheques/**", "/transfer/**", "/clearing/**").authenticated()
+                    .anyRequest().authenticated()
+            )
+            .userDetailsService(userDetailsService)
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
