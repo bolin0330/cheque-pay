@@ -3,8 +3,10 @@ package com.chequepay.service;
 import com.chequepay.dto.ChequeRequest;
 import com.chequepay.dto.ChequeResponse;
 import com.chequepay.dto.ChequeSplitRequest;
+import com.chequepay.entity.Account;
 import com.chequepay.entity.Cheque;
 import com.chequepay.entity.User;
+import com.chequepay.repository.AccountRepository;
 import com.chequepay.repository.ChequeRepository;
 import com.chequepay.repository.UserRepository;
 import com.chequepay.util.AESUtil;
@@ -22,21 +24,29 @@ import java.util.*;
 @RequiredArgsConstructor
 public class ChequeService {
 
+    private final AccountRepository accountRepository;
     private final ChequeRepository chequeRepository;
     private final UserRepository userRepository;
     private final KeyManager keyManager;
 
     public ChequeResponse issueCheque(String payerUsername, ChequeRequest request) {
+        User payer = userRepository.findByUsername(payerUsername)
+                .orElseThrow(() -> new IllegalArgumentException("Payer not found"));
+        User payee = userRepository.findByUsername(request.getPayeeUsername())
+                .orElseThrow(() -> new IllegalArgumentException("Payee not found"));
+        if (!payee.getRealname().equals(request.getPayeeRealname())) {
+            throw new IllegalArgumentException("Payee real name does not match the account");
+        }
+        Account payerAccount = accountRepository.findByUsername(payerUsername)
+                .orElseThrow(() -> new IllegalArgumentException("Payer not found"));
+        if (request.getAmount().compareTo(payerAccount.getBalance()) > 0) {
+            throw new IllegalStateException("Cheque amount exceeds payer's account balance");
+        }
+        if (request.getExpiryDate().isBefore(LocalDateTime.now())) {
+            throw new IllegalStateException("Cheque expiry date cannot be earlier than now");
+        }
+
         try {
-            User payer = userRepository.findByUsername(payerUsername)
-                    .orElseThrow(() -> new RuntimeException("Payer not found"));
-            User payee = userRepository.findByUsername(request.getPayeeUsername())
-                    .orElseThrow(() -> new RuntimeException("Payee not found"));
-
-            if (!payee.getRealname().equals(request.getPayeeRealname())) {
-                throw new RuntimeException("Payee real name does not match the account");
-            }
-
             String nonce = NonceStore.generateNonce();
 
             String chequeData = String.format(
@@ -68,6 +78,7 @@ public class ChequeService {
                     .build();
 
             chequeRepository.save(cheque);
+
             return toResponse(cheque);
 
         } catch (Exception e) {
@@ -75,39 +86,41 @@ public class ChequeService {
         }
     }
 
-    public Optional<ChequeResponse> getCheque(UUID chequeId) {
-        return chequeRepository.findById(chequeId).map(this::toResponse);
+    public ChequeResponse getCheque(UUID chequeId) {
+        return chequeRepository.findById(chequeId).
+                map(this::toResponse).
+                orElseThrow(() -> new IllegalArgumentException("Cheque not found"));
     }
 
-    public Optional<ChequeResponse> updateStatus(UUID chequeId, String newStatus) {
-        Optional<Cheque> chequeOpt = chequeRepository.findById(chequeId);
-        if (chequeOpt.isEmpty()) return Optional.empty();
+    public ChequeResponse updateStatus(UUID chequeId, String newStatus) {
+        Cheque cheque = chequeRepository.findById(chequeId)
+                .orElseThrow(() -> new IllegalArgumentException("Cheque not found"));
 
-        Cheque cheque = chequeOpt.get();
         cheque.setStatus(newStatus);
         chequeRepository.save(cheque);
-        return Optional.of(toResponse(cheque));
+
+        return toResponse(cheque);
     }
 
     public List<ChequeResponse> splitCheque(UUID chequeId, ChequeSplitRequest request) {
+        Cheque parent = chequeRepository.findById(chequeId)
+                .orElseThrow(() -> new IllegalArgumentException("Cheque not found"));
+
+        if (parent.getParentChequeId() != null) {
+            throw new IllegalStateException("Cannot split a child cheque");
+        }
+
+        if (!"ISSUED".equals(parent.getStatus())) {
+            throw new IllegalStateException("Only ISSUED cheques can be split");
+        }
+
+        BigDecimal totalSplit = request.getSplitAmounts().stream()
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (totalSplit.compareTo(parent.getAmount()) != 0) {
+            throw new IllegalStateException("Split amounts must add up to the parent cheque amount");
+        }
+
         try {
-            Cheque parent = chequeRepository.findById(chequeId)
-                    .orElseThrow(() -> new RuntimeException("Cheque not found"));
-
-            if (parent.getParentChequeId() != null) {
-                throw new RuntimeException("Cannot split a child cheque");
-            }
-
-            if (!"ISSUED".equals(parent.getStatus())) {
-                throw new RuntimeException("Only ISSUED cheques can be split");
-            }
-
-            BigDecimal totalSplit = request.getSplitAmounts().stream()
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            if (totalSplit.compareTo(parent.getAmount()) != 0) {
-                throw new RuntimeException("Split amounts must add up to the parent cheque amount");
-            }
-
             List<ChequeResponse> result = new ArrayList<>();
             for (BigDecimal amt : request.getSplitAmounts()) {
                 String childNonce = NonceStore.generateNonce();
