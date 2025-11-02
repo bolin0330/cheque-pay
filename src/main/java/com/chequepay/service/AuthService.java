@@ -2,6 +2,7 @@ package com.chequepay.service;
 
 import com.chequepay.dto.AuthResponse;
 import com.chequepay.dto.LoginRequest;
+import com.chequepay.dto.ProfileResponse;
 import com.chequepay.dto.RegisterRequest;
 import com.chequepay.entity.Account;
 import com.chequepay.entity.User;
@@ -10,6 +11,7 @@ import com.chequepay.repository.AccountRepository;
 import com.chequepay.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -28,40 +30,45 @@ public class AuthService {
 
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByUsername(request.getUsername())) {
-            return new AuthResponse(false, "Username already exists", null);
+            throw new IllegalArgumentException("Username already exists");
         }
         if (userRepository.existsByEmail(request.getEmail())) {
-            return new AuthResponse(false, "Email already registered", null);
+            throw new IllegalArgumentException("Email already registered");
         }
 
         if (!request.getRealname().matches("^[A-Za-z ]{1,25}$")) {
-            return new AuthResponse(false, "Real name must be English letters and spaces only (max 25)", null);
+            throw new IllegalArgumentException("Real name must be English letters and spaces only (max 25)");
         }
 
         if (!request.getPhoneNumber().matches("^[0-9]{1,15}$")) {
-            return new AuthResponse(false, "Phone number must be digits only (max 15)", null);
+            throw new IllegalArgumentException("Phone number must be digits only (max 15)");
         }
 
-        User user = User.builder()
-                .username(request.getUsername())
-                .email(request.getEmail())
-                .password(passwordEncoder.encode(request.getPassword()))
-                .realname(request.getRealname())
-                .phoneNumber(request.getPhoneNumber())
-                .role("USER")
-                .build();
+        try {
+            User user = User.builder()
+                    .username(request.getUsername())
+                    .email(request.getEmail())
+                    .password(passwordEncoder.encode(request.getPassword()))
+                    .realname(request.getRealname())
+                    .phoneNumber(request.getPhoneNumber())
+                    .role("USER")
+                    .build();
 
-        userRepository.save(user);
+            userRepository.save(user);
 
-        Account account = Account.builder()
-                .username(user.getUsername())
-                .realname(request.getRealname())
-                .balance(BigDecimal.valueOf(5000))
-                .build();
+            Account account = Account.builder()
+                    .username(user.getUsername())
+                    .realname(request.getRealname())
+                    .balance(BigDecimal.valueOf(5000))
+                    .build();
 
-        accountRepository.save(account);
+            accountRepository.save(account);
 
-        return new AuthResponse(true, "User registered successfully", null);
+            return new AuthResponse(true, "User registered successfully", null);
+
+        } catch (Exception e) {
+           throw new RuntimeException("Error registering user", e);
+        }
     }
 
     public AuthResponse login(LoginRequest request) {
@@ -71,9 +78,24 @@ public class AuthService {
             );
             String token = jwtUtil.generateToken(request.getUsername());
             return new AuthResponse(true, "Login successful", token);
-        } catch (Exception e) {
-            return new AuthResponse(false, "Invalid username or password", null);
+        } catch (BadCredentialsException e) {
+            throw e;
         }
+        catch (Exception e) {
+            throw new RuntimeException("Unexpected error during login", e);
+        }
+    }
+
+    public ProfileResponse profile(String username) {
+        return userRepository.findByUsername(username)
+                .map(user -> new ProfileResponse(
+                        user.getUsername(),
+                        user.getRealname(),
+                        user.getPhoneNumber(),
+                        user.getEmail(),
+                        user.getRole()
+                ))
+                .orElseThrow(() -> new RuntimeException("User not found"));
     }
 
 }
