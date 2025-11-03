@@ -24,14 +24,21 @@ public class ClearingService {
     private final AccountRepository accountRepository;
     private final KeyManager keyManager;
 
-    public boolean verifyCheque(UUID chequeId) {
-        Optional<Cheque> chequeOpt = chequeRepository.findById(chequeId);
-        if (chequeOpt.isEmpty()) return false;
+    public void verifyCheque(UUID chequeId, String currentUser) {
+        Cheque cheque = chequeRepository.findById(chequeId)
+                .orElseThrow(() -> new IllegalArgumentException("Cheque not found"));
 
-        Cheque cheque = chequeOpt.get();
+        if (!"ISSUED".equals(cheque.getStatus())) {
+            throw new IllegalStateException("Cheque is not in ISSUED status");
+        }
 
-        if (!"ISSUED".equals(cheque.getStatus())) return false;
-        if (cheque.getExpiryDate().isBefore(LocalDateTime.now())) return false;
+        if (cheque.getExpiryDate().isBefore(LocalDateTime.now())) {
+            throw new IllegalStateException("Cheque has expired");
+        }
+
+        if (!cheque.getPayeeUsername().equals(currentUser)) {
+            throw new SecurityException("You are not authorized to settle this cheque.");
+        }
 
         try {
             String aesKeyBase64 = RSAUtil.decrypt(cheque.getEncryptedKey(), keyManager.getRsaKeyPair().getPrivate());
@@ -39,33 +46,34 @@ public class ClearingService {
             String chequeData = AESUtil.decrypt(cheque.getEncryptedData(), aesKey);
 
             boolean valid = SignatureUtil.verify(chequeData, cheque.getSignature(), keyManager.getRsaKeyPair().getPublic());
-            if (!valid) return false;
-            if (NonceStore.hasBeenUsed(cheque.getNonce())) return false;
+            if (!valid) {
+                throw new SecurityException("Invalid cheque signature");
+            }
+            if (NonceStore.hasBeenUsed(cheque.getNonce())) {
+                throw new SecurityException("Cheque nonce has already been used");
+            }
 
-            return true;
+        } catch (SecurityException e) {
+            throw e;
         } catch (Exception e) {
-            e.printStackTrace();
-            return false;
+            throw new RuntimeException("Error verifying cheque", e);
         }
     }
 
-    public boolean settleCheque(UUID chequeId) {
-        Optional<Cheque> chequeOpt = chequeRepository.findById(chequeId);
-        if (chequeOpt.isEmpty()) return false;
+    public void settleCheque(UUID chequeId, String currentUser) {
+        Cheque cheque = chequeRepository.findById(chequeId)
+                .orElseThrow(() -> new IllegalArgumentException("Cheque not found"));
 
-        Cheque cheque = chequeOpt.get();
-
-        if (!verifyCheque(chequeId)) return false;
-        if (cheque.getExpiryDate().isBefore(LocalDateTime.now())) return false;
+        verifyCheque(chequeId, currentUser);
 
         try {
             Account payer = accountRepository.findByUsername(cheque.getPayerUsername())
-                    .orElseThrow(() -> new RuntimeException("Payer account not found"));
+                    .orElseThrow(() -> new IllegalArgumentException("Payer account not found"));
             Account payee = accountRepository.findByUsername(cheque.getPayeeUsername())
-                    .orElseThrow(() -> new RuntimeException("Payee account not found"));
+                    .orElseThrow(() -> new IllegalArgumentException("Payee account not found"));
 
             if (payer.getBalance().compareTo(cheque.getAmount()) < 0) {
-                throw new RuntimeException("Insufficient balance");
+                throw new IllegalStateException("Insufficient balance");
             }
 
             payer.setBalance(payer.getBalance().subtract(cheque.getAmount()));
@@ -77,10 +85,10 @@ public class ClearingService {
             chequeRepository.save(cheque);
             NonceStore.markAsUsed(cheque.getNonce());
 
-            return true;
+        } catch (SecurityException e) {
+            throw e;
         } catch (Exception e) {
-            e.printStackTrace();
-            return false;
+            throw new RuntimeException("Error settling cheque", e);
         }
     }
 
